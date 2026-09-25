@@ -66,7 +66,9 @@ def fetch_corpus_cmd(
 
 @app.command()
 def ingest(
-    path: Annotated[Path, typer.Argument(help="Corpus .jsonl file or directory of .md/.txt.")] = DEFAULT_CORPUS,
+    path: Annotated[
+        Path, typer.Argument(help="Corpus .jsonl file or directory of .md/.txt.")
+    ] = DEFAULT_CORPUS,
 ) -> None:
     """Chunk, embed, and index documents (incremental; unchanged docs are skipped)."""
 
@@ -106,9 +108,7 @@ def build_eval_set_cmd(
 
     settings = get_settings()
     count = _run(
-        lambda: build_eval_set(
-            corpus, out, settings.generation, passages_per_article=passages_per_article
-        )
+        lambda: build_eval_set(corpus, out, settings.generation, passages_per_article=passages_per_article)
     )
     typer.echo(f"wrote {count} queries to {out}")
 
@@ -124,7 +124,9 @@ def eval_cmd(
     from meridian.evaluation import run_evaluation
 
     async def main(services: Services) -> Path:
-        return await run_evaluation(services, queries_path=queries, corpus_path=corpus, docs_dir=docs_dir, k=k)
+        return await run_evaluation(
+            services, queries_path=queries, corpus_path=corpus, docs_dir=docs_dir, k=k
+        )
 
     report = _run(lambda: _with_services(main))
     typer.echo(f"wrote {report}")

@@ -218,9 +218,7 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def _request_context(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
+async def _request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     request.state.request_id = request_id
     structlog.contextvars.clear_contextvars()

@@ -93,19 +93,13 @@ class QdrantVectorStore:
                 await self._client.create_collection(
                     self._chunks,
                     vectors_config={
-                        DENSE: models.VectorParams(
-                            size=self._dense_dim, distance=models.Distance.COSINE
-                        )
+                        DENSE: models.VectorParams(size=self._dense_dim, distance=models.Distance.COSINE)
                     },
-                    sparse_vectors_config={
-                        SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)
-                    },
+                    sparse_vectors_config={SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)},
                 )
                 log.info("qdrant.collection.created", collection=self._chunks)
             # Idempotent: Qdrant no-ops when the index already exists.
-            await self._client.create_payload_index(
-                self._chunks, "doc_id", models.PayloadSchemaType.KEYWORD
-            )
+            await self._client.create_payload_index(self._chunks, "doc_id", models.PayloadSchemaType.KEYWORD)
             await self._client.create_payload_index(
                 self._chunks, "cluster_id", models.PayloadSchemaType.INTEGER
             )
@@ -113,9 +107,7 @@ class QdrantVectorStore:
             if not await self._client.collection_exists(self._centroids):
                 await self._client.create_collection(
                     self._centroids,
-                    vectors_config=models.VectorParams(
-                        size=self._dense_dim, distance=models.Distance.COSINE
-                    ),
+                    vectors_config=models.VectorParams(size=self._dense_dim, distance=models.Distance.COSINE),
                 )
                 log.info("qdrant.collection.created", collection=self._centroids)
 
@@ -200,9 +192,7 @@ class QdrantVectorStore:
                     filter=models.Filter(
                         must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))],
                         must_not=[
-                            models.FieldCondition(
-                                key="content_hash", match=models.MatchValue(value=new_hash)
-                            )
+                            models.FieldCondition(key="content_hash", match=models.MatchValue(value=new_hash))
                         ],
                     )
                 ),
@@ -283,9 +273,7 @@ class QdrantVectorStore:
                     **common, query=dense_query, using=DENSE, query_filter=dense_filter
                 )
             else:
-                response = await self._client.query_points(
-                    **common, query=sparse_query, using=SPARSE
-                )
+                response = await self._client.query_points(**common, query=sparse_query, using=SPARSE)
         return [_to_scored(p) for p in response.points]
 
     # ---------------------------------------------------------------- clusters
@@ -424,9 +412,7 @@ def _to_point(item: EmbeddedChunk) -> models.PointStruct:
         id=str(c.chunk_id),
         vector={
             DENSE: item.dense.tolist(),
-            SPARSE: models.SparseVector(
-                indices=list(item.sparse.indices), values=list(item.sparse.values)
-            ),
+            SPARSE: models.SparseVector(indices=list(item.sparse.indices), values=list(item.sparse.values)),
         },
         payload=payload,
     )

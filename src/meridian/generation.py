@@ -85,9 +85,7 @@ AnswerEvent = AnswerText | AnswerCitation | AnswerComplete
 class AnswerGenerator(Protocol):
     """Provider-agnostic streaming answer generator."""
 
-    def stream_answer(
-        self, question: str, sources: Sequence[ScoredChunk]
-    ) -> AsyncIterator[AnswerEvent]:
+    def stream_answer(self, question: str, sources: Sequence[ScoredChunk]) -> AsyncIterator[AnswerEvent]:
         """Stream an answer to ``question`` grounded in ``sources``."""
         ...
 
@@ -132,7 +130,9 @@ class ClaudeGenerator:
             "model": self._settings.model,
             "max_tokens": self._settings.max_tokens,
             "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": [*_search_results(sources), {"type": "text", "text": question}]}],
+            "messages": [
+                {"role": "user", "content": [*_search_results(sources), {"type": "text", "text": question}]}
+            ],
             "output_config": {"effort": self._settings.effort},
         }
         if self._settings.server_side_fallback:

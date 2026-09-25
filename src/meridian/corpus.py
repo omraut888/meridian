@@ -51,7 +51,8 @@ ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schema
 # Trailing Wikipedia sections that are link lists or bibliographies, not prose.
 _SECTION_HEADING = re.compile(r"^==[^=].*==\s*$", re.MULTILINE)
 _BACK_MATTER = re.compile(
-    r"^==\s*(See also|References|Notes|Citations|Sources|Bibliography|Further reading|External links)\s*==\s*$",
+    r"^==\s*(See also|References|Notes|Citations|Sources|Bibliography|Further reading|External links)"
+    r"\s*==\s*$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -361,8 +362,11 @@ def _arxiv_get(url: str) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     retrying = Retrying(
         retry=retry_if_exception(
-            lambda e: isinstance(e, urllib.error.HTTPError) and e.code in _RETRYABLE_STATUS
-            or (isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError))
+            lambda e: (
+                isinstance(e, urllib.error.HTTPError)
+                and e.code in _RETRYABLE_STATUS
+                or (isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError))
+            )
         ),
         wait=wait_random_exponential(multiplier=5.0, min=5.0, max=90.0),
         stop=stop_after_attempt(6),

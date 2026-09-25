@@ -58,7 +58,9 @@ def test_multiple_relevant_docs_normalize_by_ideal_dcg() -> None:
 
 def test_intra_list_similarity_of_identical_vectors_is_one() -> None:
     ranking = [_chunk("a", [1, 0]), _chunk("b", [1, 0]), _chunk("c", [1, 0])]
-    assert score_ranking(ranking, frozenset({"a"}), k=3, latency_ms=0.0).intra_list_similarity == pytest.approx(1.0)
+    assert score_ranking(
+        ranking, frozenset({"a"}), k=3, latency_ms=0.0
+    ).intra_list_similarity == pytest.approx(1.0)
 
 
 def test_bootstrap_ci_brackets_the_mean_and_is_deterministic() -> None:

@@ -5,7 +5,9 @@ from meridian.clustering import CorpusClusterer
 from meridian.config import ClusteringSettings
 
 
-def _blobs(n_per: int, centers: int, dim: int = 32, noise: float = 0.05, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+def _blobs(
+    n_per: int, centers: int, dim: int = 32, noise: float = 0.05, seed: int = 0
+) -> tuple[np.ndarray, np.ndarray]:
     """Tight clusters around orthogonal directions on the unit sphere."""
     rng = np.random.default_rng(seed)
     basis = np.eye(dim, dtype=np.float32)[:centers]

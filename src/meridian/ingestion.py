@@ -196,7 +196,9 @@ class StructuralChunker:
         body = text[start:end]
         cuts = [0, *(m.end() for m in _SENTENCE_BOUNDARY.finditer(body)), len(body)]
         sentences = [
-            (start + a, start + a + len(body[a:b].rstrip())) for a, b in zip(cuts, cuts[1:]) if body[a:b].strip()
+            (start + a, start + a + len(body[a:b].rstrip()))
+            for a, b in zip(cuts, cuts[1:])
+            if body[a:b].strip()
         ]
         counts = self._count([text[s:e] for s, e in sentences])
         units: list[_Unit] = []
@@ -396,7 +398,12 @@ class IngestionPipeline:
         for item in pending:
             n = len(item.chunks)
             embedded = [
-                EmbeddedChunk(chunk=c, dense=dense[offset + i], sparse=sparse[offset + i], cluster_id=clusters[offset + i])
+                EmbeddedChunk(
+                    chunk=c,
+                    dense=dense[offset + i],
+                    sparse=sparse[offset + i],
+                    cluster_id=clusters[offset + i],
+                )
                 for i, c in enumerate(item.chunks)
             ]
             offset += n
@@ -419,4 +426,3 @@ class IngestionPipeline:
             error=type(exc).__name__,
             detail=str(exc),
         )
-

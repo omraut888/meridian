@@ -95,7 +95,9 @@ def test_chunk_ids_are_deterministic_and_version_sensitive() -> None:
     chunker = StructuralChunker(_counter(), ChunkingSettings())
     doc = _wikipedia()[0]
     first, second = chunker.split(doc), chunker.split(doc)
-    edited = Document(doc.doc_id, doc.title, doc.text + "\n\nAn appended paragraph.", doc.source_uri, doc.metadata)
+    edited = Document(
+        doc.doc_id, doc.title, doc.text + "\n\nAn appended paragraph.", doc.source_uri, doc.metadata
+    )
 
     assert [c.chunk_id for c in first] == [c.chunk_id for c in second]
     assert first[0].chunk_id != chunker.split(edited)[0].chunk_id

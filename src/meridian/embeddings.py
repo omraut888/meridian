@@ -139,9 +139,7 @@ class VoyageEmbedder:
         """Embed search queries with ``input_type="query"``."""
         return await self._embed(texts, input_type="query")
 
-    async def _embed(
-        self, texts: Sequence[str], *, input_type: Literal["document", "query"]
-    ) -> FloatArray:
+    async def _embed(self, texts: Sequence[str], *, input_type: Literal["document", "query"]) -> FloatArray:
         if not texts:
             return np.empty((0, self.dimension), dtype=np.float32)
         batches = list(self._pack_batches(texts))
@@ -166,9 +164,7 @@ class VoyageEmbedder:
         if batch:
             yield batch
 
-    async def _embed_batch(
-        self, batch: list[str], *, input_type: Literal["document", "query"]
-    ) -> FloatArray:
+    async def _embed_batch(self, batch: list[str], *, input_type: Literal["document", "query"]) -> FloatArray:
         retrying = AsyncRetrying(
             retry=retry_if_exception_type(_TRANSIENT_VOYAGE_ERRORS),
             wait=wait_random_exponential(multiplier=1.0, max=60.0),
@@ -188,9 +184,7 @@ class VoyageEmbedder:
                             truncation=False,
                         )
         except voyageai.error.VoyageError as exc:
-            raise EmbeddingError(
-                f"Voyage embed failed for batch of {len(batch)} ({input_type})"
-            ) from exc
+            raise EmbeddingError(f"Voyage embed failed for batch of {len(batch)} ({input_type})") from exc
         log.debug(
             "voyage.embed",
             batch_size=len(batch),
@@ -238,9 +232,7 @@ def _log_retry(state: RetryCallState) -> None:
 
 
 def _to_sparse(indices: np.ndarray, values: np.ndarray) -> SparseVector:
-    return SparseVector(
-        indices=tuple(int(i) for i in indices), values=tuple(float(v) for v in values)
-    )
+    return SparseVector(indices=tuple(int(i) for i in indices), values=tuple(float(v) for v in values))
 
 
 def _l2_normalize(matrix: FloatArray) -> FloatArray:

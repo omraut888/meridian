@@ -115,13 +115,15 @@ async def build_eval_set(
     slots = asyncio.Semaphore(concurrency)
 
     async def one(document: Document) -> list[dict[str, Any]]:
-        passages = _select_passages(document, passages_per_article, random.Random(f"{seed}:{document.doc_id}"))
+        passages = _select_passages(
+            document, passages_per_article, random.Random(f"{seed}:{document.doc_id}")
+        )
         if not passages:
             return []
         prompt = QUESTION_PROMPT.format(
             n=len(passages),
             title=document.title,
-            passages="\n\n".join(f"<passage index=\"{i}\">\n{p}\n</passage>" for i, p in enumerate(passages)),
+            passages="\n\n".join(f'<passage index="{i}">\n{p}\n</passage>' for i, p in enumerate(passages)),
         )
         async with slots:
             try:
@@ -192,7 +194,9 @@ def load_queries(path: Path) -> list[EvalQuery]:
             try:
                 r = json.loads(line)
                 queries.append(
-                    EvalQuery(r["query_id"], r["query"], frozenset(r["relevant_doc_ids"]), r["source"], r["topic"])
+                    EvalQuery(
+                        r["query_id"], r["query"], frozenset(r["relevant_doc_ids"]), r["source"], r["topic"]
+                    )
                 )
             except (json.JSONDecodeError, KeyError) as exc:
                 raise IngestionError(f"{path}:{line_no}: malformed query record") from exc
@@ -305,11 +309,19 @@ def ablation_configs(defaults: RetrievalOptions, k: int) -> list[Configuration]:
         Configuration("Dense only", "Voyage embeddings, cosine kNN", replace(base, use_sparse=False)),
         Configuration("BM25 only", "Sparse BM25, server-side IDF", replace(base, use_dense=False)),
         Configuration("Hybrid (RRF)", "Dense + BM25, reciprocal rank fusion", base),
-        Configuration("Hybrid + routing (m=1)", "Dense branch restricted to nearest cluster", replace(base, route_top_m=1)),
         Configuration(
-            f"Hybrid + routing (m={m})", f"Dense branch restricted to {m} nearest clusters", replace(base, route_top_m=m)
+            "Hybrid + routing (m=1)",
+            "Dense branch restricted to nearest cluster",
+            replace(base, route_top_m=1),
         ),
-        Configuration(f"Hybrid + MMR (λ={lam})", "MMR over the fused candidate pool", replace(base, mmr_lambda=lam)),
+        Configuration(
+            f"Hybrid + routing (m={m})",
+            f"Dense branch restricted to {m} nearest clusters",
+            replace(base, route_top_m=m),
+        ),
+        Configuration(
+            f"Hybrid + MMR (λ={lam})", "MMR over the fused candidate pool", replace(base, mmr_lambda=lam)
+        ),
         Configuration(
             "Hybrid + routing + MMR (default)",
             f"m={m}, λ={lam}: the shipped configuration",
@@ -379,8 +391,11 @@ async def run_evaluation(
     }
     (docs_dir / "eval_results.json").write_text(
         json.dumps(
-            {"meta": meta, "summaries": [asdict(s) for s in summaries],
-             "per_query": {name: [asdict(s) for s in scores] for name, scores in per_config.items()}},
+            {
+                "meta": meta,
+                "summaries": [asdict(s) for s in summaries],
+                "per_query": {name: [asdict(s) for s in scores] for name, scores in per_config.items()},
+            },
             indent=2,
         ),
         encoding="utf-8",
@@ -516,28 +531,35 @@ def _report_markdown(summaries: Sequence[Summary], meta: dict[str, Any]) -> str:
     sources = sorted({src for s in summaries for src in s.ndcg_by_source})
     by_source = (
         "| Configuration | " + " | ".join(f"nDCG@{k} ({src})" for src in sources) + " |\n"
-        "|---|" + "---|" * len(sources) + "\n"
+        "|---|"
+        + "---|" * len(sources)
+        + "\n"
         + "\n".join(
-            f"| {s.name} | " + " | ".join(f"{s.ndcg_by_source.get(src, float('nan')):.3f}" for src in sources) + " |"
+            f"| {s.name} | "
+            + " | ".join(f"{s.ndcg_by_source.get(src, float('nan')):.3f}" for src in sources)
+            + " |"
             for s in summaries
         )
     )
     diversity = (
         f"| Configuration | Distinct docs@{k} | Intra-list similarity@{k} (lower = more diverse) |\n"
         "|---|---|---|\n"
-        + "\n".join(f"| {s.name} | {s.distinct_docs:.2f} | {s.intra_list_similarity:.3f} |" for s in summaries)
+        + "\n".join(
+            f"| {s.name} | {s.distinct_docs:.2f} | {s.intra_list_similarity:.3f} |" for s in summaries
+        )
     )
     configs = "\n".join(f"- **{s.name}**: {s.description}" for s in summaries)
     purity = meta.get("cluster_topic_purity")
     purity_line = (
-        f"- Cluster/topic purity: **{purity:.1%}** of chunks fall in a cluster whose majority topic is their own "
+        f"- Cluster/topic purity: **{purity:.1%}** of chunks fall in a cluster "
+        "whose majority topic is their own "
         "(topic labels are never shown to the clusterer)."
         if purity is not None
         else "- Clusters: not fitted."
     )
     return f"""# Retrieval evaluation
 
-_Generated by `meridian eval` on {meta['generated_at']}. Raw per-query scores: \
+_Generated by `meridian eval` on {meta["generated_at"]}. Raw per-query scores: \
 [`eval_results.json`](eval_results.json)._
 
 {_picture("assets/")}
@@ -560,12 +582,13 @@ local Qdrant, excluding query embedding (identical across rows), measured sequen
 
 ## Setup
 
-- Corpus: {meta['documents']} documents ({', '.join(f'{v} {k_}' for k_, v in meta['documents_by_source'].items())}) \
-across {len(meta['topics'])} topics ({', '.join(meta['topics'])}), indexed as **{meta['chunks']} chunks**.
-- Embeddings: `{meta['embedding_model']}` (dense) + BM25 with server-side IDF (sparse), in Qdrant.
-- Clusters: {meta['clusters']} (spherical k-means, k chosen by cosine silhouette).
+- Corpus: {meta["documents"]} documents \
+({", ".join(f"{v} {k_}" for k_, v in meta["documents_by_source"].items())}) \
+across {len(meta["topics"])} topics ({", ".join(meta["topics"])}), indexed as **{meta["chunks"]} chunks**.
+- Embeddings: `{meta["embedding_model"]}` (dense) + BM25 with server-side IDF (sparse), in Qdrant.
+- Clusters: {meta["clusters"]} (spherical k-means, k chosen by cosine silhouette).
 {purity_line}
-- Queries: {meta['queries']} ({', '.join(f'{v} {k_}' for k_, v in meta['queries_by_source'].items())}), \
+- Queries: {meta["queries"]} ({", ".join(f"{v} {k_}" for k_, v in meta["queries_by_source"].items())}), \
 one per sampled passage, written by Claude from that passage and frozen in `data/eval/queries.jsonl`. \
 The passage's document is the relevant document.
 - Metrics use document-level relevance at cutoff k={k}: a document counts at the rank of its first chunk.
@@ -576,12 +599,12 @@ The passage's document is the relevant document.
 
 ## Caveats
 
-- **One judged document per query.** Other documents that also answer a query count as misses, so absolute \
-scores are a lower bound; comparisons between rows are the meaningful signal.
-- **Generated queries.** Each is written from a single passage. Despite the paraphrasing instruction they can \
-share vocabulary with it, which may favor lexical (BM25) matching relative to real user queries.
-- **MMR is not a relevance optimization.** With one relevant document, diversity cannot raise nDCG. Its value \
-shows up in the diversity table, and the Δ column shows what that diversity costs in ranking quality.
+- **One judged document per query.** Other documents that also answer a query count as misses, so \
+absolute scores are a lower bound; comparisons between rows are the meaningful signal.
+- **Generated queries.** Each is written from a single passage. Despite the paraphrasing instruction they \
+can share vocabulary with it, which may favor lexical (BM25) matching relative to real user queries.
+- **MMR is not a relevance optimization.** With one relevant document, diversity cannot raise nDCG. Its \
+value shows up in the diversity table, and the Δ column shows what that diversity costs in ranking quality.
 - Sample size: CIs come from {BOOTSTRAP_RESAMPLES:,} bootstrap resamples over queries (seed {BOOTSTRAP_SEED}).
 """
 
@@ -609,8 +632,20 @@ def _update_readme(readme: Path, section: str) -> None:
 
 # Reference-palette tokens (dataviz skill): one series → one hue, no legend.
 _THEMES: dict[bool, dict[str, str]] = {
-    False: {"surface": "#fcfcfb", "text": "#0b0b0b", "muted": "#52514e", "grid": "#e4e3df", "series": "#2a78d6"},
-    True: {"surface": "#1a1a19", "text": "#ffffff", "muted": "#c3c2b7", "grid": "#383835", "series": "#3987e5"},
+    False: {
+        "surface": "#fcfcfb",
+        "text": "#0b0b0b",
+        "muted": "#52514e",
+        "grid": "#e4e3df",
+        "series": "#2a78d6",
+    },
+    True: {
+        "surface": "#1a1a19",
+        "text": "#ffffff",
+        "muted": "#c3c2b7",
+        "grid": "#383835",
+        "series": "#3987e5",
+    },
 }
 
 
@@ -644,8 +679,13 @@ def render_chart(summaries: Sequence[Summary], k: int, out: Path, *, dark: bool)
         ax.scatter(vals, ys, s=64, color=theme["series"], edgecolor=theme["surface"], linewidth=2, zorder=3)
         best = int(np.argmax(vals))
         ax.annotate(
-            f"{vals[best]:.3f}", (cis[best][1], ys[best]), xytext=(6, 0), textcoords="offset points",
-            va="center", color=theme["text"], fontsize=9,
+            f"{vals[best]:.3f}",
+            (cis[best][1], ys[best]),
+            xytext=(6, 0),
+            textcoords="offset points",
+            va="center",
+            color=theme["text"],
+            fontsize=9,
         )
         ax.set_title(title, loc="left", color=theme["text"], fontsize=11, fontweight="bold")
         ax.set_xlim(x_min, 1.0)
@@ -655,7 +695,9 @@ def render_chart(summaries: Sequence[Summary], k: int, out: Path, *, dark: bool)
         for spine in ax.spines.values():
             spine.set_visible(False)
     axes[0].set_yticks(np.arange(len(names)), names, color=theme["text"])
-    fig.text(0.01, 0.01, "Dots: mean over queries · bars: 95% bootstrap CI", color=theme["muted"], fontsize=8.5)
+    fig.text(
+        0.01, 0.01, "Dots: mean over queries · bars: 95% bootstrap CI", color=theme["muted"], fontsize=8.5
+    )
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     fig.savefig(out, facecolor=theme["surface"])
     plt.close(fig)

@@ -80,9 +80,7 @@ class QueryEmbedding:
     sparse: SparseVector
 
 
-def mmr(
-    relevance: NDArray[np.floating], candidates: FloatArray, *, k: int, lambda_: float
-) -> list[int]:
+def mmr(relevance: NDArray[np.floating], candidates: FloatArray, *, k: int, lambda_: float) -> list[int]:
     """Select ``k`` items by Maximal Marginal Relevance.
 
     Greedily picks the item maximizing
