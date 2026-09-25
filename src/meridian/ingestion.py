@@ -7,7 +7,8 @@ import json
 import re
 import time
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from itertools import pairwise
 from pathlib import Path
 
 import structlog
@@ -99,12 +100,17 @@ def _load_text_file(file: Path, *, root: Path) -> Document:
 
 @dataclass(frozen=True, slots=True)
 class _Unit:
-    """An indivisible span of text (paragraph, sentence, or word window)."""
+    """An indivisible span of text (paragraph, sentence, or word window).
+
+    ``gap`` is the token cost of the text between the previous unit and this one
+    (whitespace, headings), paid only when both land in the same chunk.
+    """
 
     start: int
     end: int
     tokens: int
     section: str | None
+    gap: int = 0
 
 
 class StructuralChunker:
@@ -154,7 +160,7 @@ class StructuralChunker:
                     doc_id=document.doc_id,
                     index=index,
                     text=document.text[start:end],
-                    token_count=sum(u.tokens for u in group),
+                    token_count=_span_tokens(group),
                     char_span=(start, end),
                     title=document.title,
                     source_uri=document.source_uri,
@@ -182,7 +188,8 @@ class StructuralChunker:
                 units.append(_Unit(start, end, tokens, sec))
             else:
                 units.extend(self._split_oversized(text, start, end, sec))
-        return units
+        gaps = self._count([text[a.end : b.start] for a, b in pairwise(units)])
+        return [units[0], *(replace(u, gap=g) for u, g in zip(units[1:], gaps, strict=True))]
 
     def _split_oversized(self, text: str, start: int, end: int, section: str | None) -> list[_Unit]:
         """Split a paragraph into sentences, and any oversized sentence into word windows."""
@@ -218,27 +225,39 @@ class StructuralChunker:
         current_tokens = 0
         for unit in units:
             section_break = bool(current) and unit.section != current[-1].section
-            overflow = current_tokens + unit.tokens > self._max
+            overflow = current_tokens + unit.gap + unit.tokens > self._max
             if current and (overflow or (section_break and current_tokens >= self._max // 2)):
                 yield current
-                current = [] if section_break else self._overlap_tail(current, unit.tokens)
-                current_tokens = sum(u.tokens for u in current)
+                current = [] if section_break else self._overlap_tail(current, unit)
+                current_tokens = _span_tokens(current)
+            current_tokens += unit.gap + unit.tokens if current else unit.tokens
             current.append(unit)
-            current_tokens += unit.tokens
         if current:
             yield current
 
-    def _overlap_tail(self, previous: list[_Unit], incoming_tokens: int) -> list[_Unit]:
-        """Trailing units of ``previous`` that fit both the overlap and the chunk budget."""
+    def _overlap_tail(self, previous: list[_Unit], incoming: _Unit) -> list[_Unit]:
+        """Trailing units of ``previous`` that fit both the overlap and the chunk budget.
+
+        A chunk that straddled a section boundary carries no overlap, so text is
+        never repeated under a different section than the one it came from.
+        """
+        if previous[0].section != incoming.section:
+            return []
         tail: list[_Unit] = []
         tokens = 0
-        budget = min(self._overlap, self._max - incoming_tokens)
+        budget = min(self._overlap, self._max - incoming.gap - incoming.tokens)
         for unit in reversed(previous[1:]):  # never repeat the whole previous chunk
-            if tokens + unit.tokens > budget:
+            cost = unit.tokens + (tail[0].gap if tail else 0)
+            if tokens + cost > budget:
                 break
             tail.insert(0, unit)
-            tokens += unit.tokens
+            tokens += cost
         return tail
+
+
+def _span_tokens(units: Sequence[_Unit]) -> int:
+    """Estimated token count of the contiguous span covering ``units``."""
+    return units[0].tokens + sum(u.gap + u.tokens for u in units[1:]) if units else 0
 
 
 def embedding_text(chunk: Chunk) -> str:

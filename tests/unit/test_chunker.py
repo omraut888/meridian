@@ -56,7 +56,9 @@ def test_every_paragraph_is_covered(small_chunker: StructuralChunker) -> None:
             stripped = line.strip()
             if stripped and not stripped.startswith("=="):
                 start = doc.text.index(stripped, offset)
-                assert set(range(start, start + len(stripped))) <= covered, (doc.doc_id, stripped[:60])
+                # Chunks are trimmed spans, so whitespace between sentences may fall between chunks.
+                content = {i for i in range(start, start + len(stripped)) if not doc.text[i].isspace()}
+                assert content <= covered, (doc.doc_id, stripped[:60])
             offset += len(line) + 1
 
 
