@@ -210,7 +210,7 @@ async def _answer_events(
                 )
     except MeridianError as exc:
         # Headers are already sent; report in-band and end the stream cleanly.
-        log.error("api.answer.stream_error", error=type(exc).__name__, detail=str(exc))
+        log.error("api.answer.stream_error", error=type(exc).__name__, detail=str(exc))  # noqa: TRY400 - expected domain error, no traceback
         yield _sse("error", {"type": type(exc).__name__, "detail": str(exc)})
 
 

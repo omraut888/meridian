@@ -253,7 +253,9 @@ def score_ranking(
             first = rank
     dcg = sum(g / np.log2(r + 1) for r, g in enumerate(gains, start=1))
     ideal = sum(1.0 / np.log2(r + 1) for r in range(1, min(len(relevant), k) + 1))
-    found_at = lambda cutoff: len({c.chunk.doc_id for c in top[:cutoff]} & relevant) / len(relevant)  # noqa: E731
+
+    def found_at(cutoff: int) -> float:
+        return len({c.chunk.doc_id for c in top[:cutoff]} & relevant) / len(relevant)
 
     if len(top) >= 2:
         vectors = np.vstack([c.dense for c in top])
@@ -378,7 +380,8 @@ async def run_evaluation(
     summaries = [_summarize(c, per_config[c.name], queries, baseline) for c in configs]
     index_stats = await _index_stats(services, corpus_path)
 
-    docs_dir.mkdir(parents=True, exist_ok=True)
+    # Blocking I/O is fine here: this runs only as the one-shot `meridian eval` command.
+    docs_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
     assets = docs_dir / "assets"
     assets.mkdir(exist_ok=True)
     meta = {

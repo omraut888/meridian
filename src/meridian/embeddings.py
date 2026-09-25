@@ -12,7 +12,6 @@ from typing import Literal, Protocol
 
 import numpy as np
 import structlog
-import voyageai
 import voyageai.error
 from fastembed import SparseTextEmbedding
 from tenacity import (
@@ -22,6 +21,10 @@ from tenacity import (
     stop_after_attempt,
     wait_random_exponential,
 )
+
+# voyageai re-exports these without __all__, which strict mypy treats as private.
+from voyageai.client import Client
+from voyageai.client_async import AsyncClient
 
 from meridian.config import SparseSettings, VoyageSettings
 from meridian.exceptions import ConfigurationError, EmbeddingError
@@ -50,7 +53,7 @@ def voyage_token_counter(model: str) -> TokenCounter:
     Tokenization runs locally (the Hugging Face tokenizer is downloaded once and
     cached), needs no API key, and makes no network call per invocation.
     """
-    client = voyageai.Client(api_key=None)
+    client = Client(api_key=None)
 
     def count(texts: Sequence[str]) -> list[int]:
         if not texts:
@@ -114,7 +117,7 @@ class VoyageEmbedder:
             raise ConfigurationError("MERIDIAN_VOYAGE__API_KEY is not set")
         self._settings = settings
         # Retries are owned by this class (with logging), so the SDK's are disabled.
-        self._client = voyageai.AsyncClient(
+        self._client = AsyncClient(
             api_key=settings.api_key.get_secret_value(),
             max_retries=0,
             timeout=settings.timeout_s,
@@ -236,7 +239,8 @@ def _to_sparse(indices: np.ndarray, values: np.ndarray) -> SparseVector:
 
 
 def _l2_normalize(matrix: FloatArray) -> FloatArray:
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms: FloatArray = np.linalg.norm(matrix, axis=1, keepdims=True)
     if np.any(norms == 0):
         raise EmbeddingError("provider returned a zero vector")
-    return matrix / norms
+    # numpy's stubs widen float32 / float32 to floating[Any]; this is a no-op cast.
+    return (matrix / norms).astype(np.float32, copy=False)

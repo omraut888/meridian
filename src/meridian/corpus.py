@@ -363,8 +363,7 @@ def _arxiv_get(url: str) -> bytes:
     retrying = Retrying(
         retry=retry_if_exception(
             lambda e: (
-                isinstance(e, urllib.error.HTTPError)
-                and e.code in _RETRYABLE_STATUS
+                (isinstance(e, urllib.error.HTTPError) and e.code in _RETRYABLE_STATUS)
                 or (isinstance(e, urllib.error.URLError) and not isinstance(e, urllib.error.HTTPError))
             )
         ),
@@ -374,7 +373,7 @@ def _arxiv_get(url: str) -> bytes:
     )
     try:
         for attempt in retrying:
-            with attempt, urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 - fixed https URL
+            with attempt, urllib.request.urlopen(request, timeout=60) as response:  # fixed https URL
                 body: bytes = response.read()
     except urllib.error.URLError as exc:
         raise CorpusFetchError(f"GET {url} failed: {exc}") from exc

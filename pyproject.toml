@@ -73,5 +73,5 @@ mypy_path = "src"
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["voyageai.*", "fastembed.*", "sklearn.*", "defusedxml.*"]
+module = ["fastembed.*", "sklearn.*", "defusedxml.*"]
 ignore_missing_imports = true

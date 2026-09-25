@@ -196,9 +196,7 @@ class StructuralChunker:
         body = text[start:end]
         cuts = [0, *(m.end() for m in _SENTENCE_BOUNDARY.finditer(body)), len(body)]
         sentences = [
-            (start + a, start + a + len(body[a:b].rstrip()))
-            for a, b in zip(cuts, cuts[1:])
-            if body[a:b].strip()
+            (start + a, start + a + len(body[a:b].rstrip())) for a, b in pairwise(cuts) if body[a:b].strip()
         ]
         counts = self._count([text[s:e] for s, e in sentences])
         units: list[_Unit] = []

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
-from typing import Annotated, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import structlog
 import typer
@@ -32,12 +32,12 @@ def _setup() -> None:
     configure_logging(settings.log_level, json=settings.log_json)
 
 
-def _run(main: Callable[[], Awaitable[T]]) -> T:
+def _run(main: Callable[[], Coroutine[Any, Any, T]]) -> T:
     """Run an async command, converting domain errors into a clean non-zero exit."""
     try:
         return asyncio.run(main())
     except MeridianError as exc:
-        log.error("cli.failed", error=type(exc).__name__, detail=str(exc))
+        log.error("cli.failed", error=type(exc).__name__, detail=str(exc))  # noqa: TRY400 - expected domain error, no traceback
         raise typer.Exit(code=1) from exc
 
 

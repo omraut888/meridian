@@ -328,7 +328,7 @@ class QdrantVectorStore:
             assignments: Chunk ID to cluster ID.
             version: Identifier of the fitted model, stored on every centroid.
         """
-        by_cluster: dict[int, list[str]] = defaultdict(list)
+        by_cluster: dict[int, list[models.ExtendedPointId]] = defaultdict(list)
         for point_id, cluster_id in assignments.items():
             by_cluster[cluster_id].append(str(point_id))
 

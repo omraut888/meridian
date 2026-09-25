@@ -1,6 +1,7 @@
 """Chunker tests on real corpus documents with the real Voyage tokenizer (local, no API key)."""
 
 from functools import cache
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -66,7 +67,7 @@ def test_consecutive_chunks_in_a_section_overlap(small_chunker: StructuralChunke
     overlaps = 0
     for doc in _wikipedia():
         chunks = small_chunker.split(doc)
-        for a, b in zip(chunks, chunks[1:], strict=False):
+        for a, b in pairwise(chunks):
             assert b.char_span[0] >= a.char_span[0]
             if b.char_span[0] < a.char_span[1]:
                 assert a.metadata.get("section") == b.metadata.get("section")

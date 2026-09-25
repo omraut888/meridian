@@ -187,5 +187,6 @@ class ClusterRouter:
 
 
 def _normalize(x: FloatArray) -> FloatArray:
-    norms = np.linalg.norm(x, axis=1, keepdims=True)
-    return x / np.where(norms == 0, 1.0, norms)
+    norms: FloatArray = np.linalg.norm(x, axis=1, keepdims=True)
+    # numpy's stubs widen float32 / float32 to floating[Any]; this is a no-op cast.
+    return (x / np.where(norms == 0, 1.0, norms)).astype(np.float32, copy=False)
