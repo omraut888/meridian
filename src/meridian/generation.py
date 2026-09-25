@@ -155,6 +155,8 @@ class ClaudeGenerator:
                             cited_text=event.citation.cited_text,
                         )
                 final = await stream.get_final_message()
+                # Messages assembled from a stream carry no _request_id; the stream does.
+                request_id = stream.request_id
         except anthropic.APIStatusError as exc:
             raise GenerationError(
                 f"Claude API returned {exc.status_code} (request_id={exc.request_id})"
@@ -172,7 +174,7 @@ class ClaudeGenerator:
             input_tokens=final.usage.input_tokens,
             output_tokens=final.usage.output_tokens,
             sources=len(sources),
-            request_id=final._request_id,
+            request_id=request_id,
         )
         yield AnswerComplete(
             stop_reason=final.stop_reason,
