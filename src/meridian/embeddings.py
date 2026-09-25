@@ -7,7 +7,9 @@ embedders live in their own module rather than inside either pipeline.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator, Sequence
+import time
+from collections import deque
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from typing import Literal, Protocol
 
 import numpy as np
@@ -61,6 +63,76 @@ def voyage_token_counter(model: str) -> TokenCounter:
         return [len(enc.ids) for enc in client.tokenize(list(texts), model=model)]
 
     return count
+
+
+class RateLimiter:
+    """Sliding-window limit on requests and tokens per window.
+
+    ``acquire`` waits until a request of the given size fits both budgets, then
+    records it. Pacing before sending, instead of retrying on 429s, matters under
+    very low limits: rejected requests count against the request budget too, so
+    retry storms can starve every batch.
+    """
+
+    def __init__(
+        self,
+        *,
+        requests: int | None,
+        tokens: int | None,
+        window_s: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        """Create the limiter.
+
+        Args:
+            requests: Maximum requests per window, or ``None`` for no request limit.
+            tokens: Maximum tokens per window, or ``None`` for no token limit.
+            window_s: Window length in seconds.
+            clock: Monotonic clock (injectable for tests).
+            sleep: Async sleep (injectable for tests).
+        """
+        self._requests = requests
+        self._tokens = tokens
+        self._window = window_s
+        self._clock = clock
+        self._sleep = sleep
+        self._sent: deque[tuple[float, int]] = deque()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, tokens: int) -> None:
+        """Wait until a request costing ``tokens`` fits, then record it.
+
+        Raises:
+            ValueError: If ``tokens`` exceeds the per-window token budget, so the
+                request could never be sent.
+        """
+        if self._tokens is not None and tokens > self._tokens:
+            raise ValueError(f"request of {tokens} tokens exceeds the {self._tokens}-token window budget")
+        async with self._lock:  # FIFO: waiters are admitted in arrival order
+            while True:
+                now = self._clock()
+                while self._sent and self._sent[0][0] <= now - self._window:
+                    self._sent.popleft()
+                wait = self._wait_for(now, tokens)
+                if wait <= 0:
+                    self._sent.append((now, tokens))
+                    return
+                await self._sleep(wait)
+
+    def _wait_for(self, now: float, tokens: int) -> float:
+        """Seconds until enough of the window expires for this request to fit."""
+        wait = 0.0
+        if self._requests is not None and len(self._sent) >= self._requests:
+            wait = self._sent[len(self._sent) - self._requests][0] + self._window - now
+        if self._tokens is not None:
+            used = sum(t for _, t in self._sent)
+            for sent_at, sent_tokens in self._sent:
+                if used + tokens <= self._tokens:
+                    break
+                used -= sent_tokens
+                wait = max(wait, sent_at + self._window - now)
+        return wait
 
 
 class DenseEmbedder(Protocol):
@@ -124,6 +196,15 @@ class VoyageEmbedder:
         )
         self._semaphore = asyncio.Semaphore(settings.max_concurrency)
         self._count_tokens = voyage_token_counter(settings.model)
+        self._limiter = (
+            RateLimiter(requests=settings.requests_per_minute, tokens=settings.tokens_per_minute)
+            if settings.requests_per_minute or settings.tokens_per_minute
+            else None
+        )
+        # A batch larger than the per-minute token budget could never be sent.
+        self._batch_tokens = min(
+            settings.max_batch_tokens, settings.tokens_per_minute or settings.max_batch_tokens
+        )
 
     @property
     def dimension(self) -> int:
@@ -147,27 +228,35 @@ class VoyageEmbedder:
             return np.empty((0, self.dimension), dtype=np.float32)
         batches = list(self._pack_batches(texts))
         results = await asyncio.gather(
-            *(self._embed_batch(batch, input_type=input_type) for batch in batches)
+            *(self._embed_batch(batch, tokens, input_type=input_type) for batch, tokens in batches)
         )
         matrix = np.vstack(results).astype(np.float32, copy=False)
         return _l2_normalize(matrix)
 
-    def _pack_batches(self, texts: Sequence[str]) -> Iterator[list[str]]:
+    def _pack_batches(self, texts: Sequence[str]) -> Iterator[tuple[list[str], int]]:
+        """Yield ``(batch, token_count)`` pairs within the text and token limits."""
         token_counts = self.count_tokens(texts)
         batch: list[str] = []
         batch_tokens = 0
         for text, n_tokens in zip(texts, token_counts, strict=True):
             full = len(batch) >= self._settings.max_batch_texts
-            over_budget = batch_tokens + n_tokens > self._settings.max_batch_tokens
+            over_budget = batch_tokens + n_tokens > self._batch_tokens
             if batch and (full or over_budget):
-                yield batch
+                yield batch, batch_tokens
                 batch, batch_tokens = [], 0
             batch.append(text)
             batch_tokens += n_tokens
         if batch:
-            yield batch
+            yield batch, batch_tokens
 
-    async def _embed_batch(self, batch: list[str], *, input_type: Literal["document", "query"]) -> FloatArray:
+    async def _embed_batch(
+        self, batch: list[str], tokens: int, *, input_type: Literal["document", "query"]
+    ) -> FloatArray:
+        if self._settings.tokens_per_minute is not None and tokens > self._settings.tokens_per_minute:
+            # Only a single oversized text can get here; packing keeps batches within budget.
+            raise EmbeddingError(
+                f"text of {tokens} tokens exceeds tokens_per_minute={self._settings.tokens_per_minute}"
+            )
         retrying = AsyncRetrying(
             retry=retry_if_exception_type(_TRANSIENT_VOYAGE_ERRORS),
             wait=wait_random_exponential(multiplier=1.0, max=60.0),
@@ -179,6 +268,8 @@ class VoyageEmbedder:
             async with self._semaphore:
                 async for attempt in retrying:
                     with attempt:
+                        if self._limiter is not None:  # retries are paced too
+                            await self._limiter.acquire(tokens)
                         response = await self._client.embed(
                             batch,
                             model=self._settings.model,

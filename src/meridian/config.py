@@ -25,6 +25,10 @@ class VoyageSettings(BaseModel):
     max_concurrency: int = Field(4, ge=1)
     max_retries: int = Field(6, ge=0)
     timeout_s: float = Field(60.0, gt=0)
+    # Client-side pacing for accounts with low rate limits (e.g. Voyage's 3 RPM /
+    # 10K TPM without a payment method). Unset means no pacing.
+    requests_per_minute: int | None = Field(None, ge=1)
+    tokens_per_minute: int | None = Field(None, ge=1)
 
 
 class SparseSettings(BaseModel):
