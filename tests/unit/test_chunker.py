@@ -107,3 +107,16 @@ def test_chunk_ids_are_deterministic_and_version_sensitive() -> None:
 def test_overlap_must_be_smaller_than_window() -> None:
     with pytest.raises(ValueError, match="overlap"):
         ChunkingSettings(max_tokens=64, overlap_tokens=64)
+
+
+def test_hash_lines_are_headings_only_in_markdown() -> None:
+    chunker = StructuralChunker(_counter(), ChunkingSettings())
+    text = "Intro line.\n# Setup\nInstall it first."
+
+    md_units = chunker._units(text, markdown=True)
+    plain_units = chunker._units(text, markdown=False)
+
+    assert [text[u.start : u.end] for u in md_units] == ["Intro line.", "Install it first."]
+    assert [u.section for u in md_units] == [None, "Setup"]
+    # Outside Markdown the "#" line is content (e.g. a pseudocode comment) and must be indexed.
+    assert [text[u.start : u.end] for u in plain_units] == ["Intro line.", "# Setup", "Install it first."]

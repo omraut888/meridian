@@ -144,7 +144,8 @@ class StructuralChunker:
         Returns:
             Chunks in document order; empty if the document has no text.
         """
-        units = self._units(document.text)
+        # "#" lines are headings only in Markdown; elsewhere they are content (e.g. pseudocode comments).
+        units = self._units(document.text, markdown=document.source_uri.endswith(".md"))
         if not units:
             return []
         doc_hash = document.content_hash
@@ -170,12 +171,12 @@ class StructuralChunker:
             )
         return chunks
 
-    def _units(self, text: str) -> list[_Unit]:
+    def _units(self, text: str, *, markdown: bool) -> list[_Unit]:
         spans: list[tuple[int, int, str | None]] = []
         section: str | None = None
         for match in _PARAGRAPH.finditer(text):
             heading = _HEADING.fullmatch(match.group())
-            if heading:
+            if heading and (heading.group("wiki") or markdown):
                 section = heading.group("wiki") or heading.group("md")
                 continue
             spans.append((match.start(), match.end(), section))
