@@ -52,14 +52,20 @@ async def _with_services(fn: Callable[[Services], Awaitable[T]]) -> T:
 @app.command("fetch-corpus")
 def fetch_corpus_cmd(
     out: Annotated[Path, typer.Option(help="Destination JSONL file.")] = DEFAULT_CORPUS,
-    arxiv_per_topic: Annotated[int, typer.Option(min=1, max=100)] = 15,
-    wikipedia_max_chars: Annotated[int, typer.Option(min=500)] = 5_000,
+    arxiv_per_topic: Annotated[int, typer.Option(min=1, max=100)] = 20,
+    wikipedia_max_chars: Annotated[int, typer.Option(min=500)] = 8_000,
+    mirrors_per_topic: Annotated[int, typer.Option(min=0, help="Near-duplicate distractors per topic.")] = 2,
 ) -> None:
     """Download the Wikipedia + arXiv corpus from their public APIs."""
     from meridian.corpus import fetch_corpus
 
     count = _run(
-        lambda: fetch_corpus(out, arxiv_per_topic=arxiv_per_topic, wikipedia_max_chars=wikipedia_max_chars)
+        lambda: fetch_corpus(
+            out,
+            arxiv_per_topic=arxiv_per_topic,
+            wikipedia_max_chars=wikipedia_max_chars,
+            mirrors_per_topic=mirrors_per_topic,
+        )
     )
     typer.echo(f"wrote {count} documents to {out}")
 
@@ -102,13 +108,20 @@ def build_eval_set_cmd(
     corpus: Annotated[Path, typer.Option(help="Corpus JSONL.")] = DEFAULT_CORPUS,
     out: Annotated[Path, typer.Option(help="Destination queries JSONL.")] = DEFAULT_QUERIES,
     passages_per_article: Annotated[int, typer.Option(min=1, max=10)] = 2,
+    multihop_per_topic: Annotated[int, typer.Option(min=0, max=50)] = 5,
 ) -> None:
     """Generate evaluation queries from corpus passages with Claude (run once; commit the output)."""
     from meridian.evaluation import build_eval_set
 
     settings = get_settings()
     count = _run(
-        lambda: build_eval_set(corpus, out, settings.generation, passages_per_article=passages_per_article)
+        lambda: build_eval_set(
+            corpus,
+            out,
+            settings.generation,
+            passages_per_article=passages_per_article,
+            multihop_per_topic=multihop_per_topic,
+        )
     )
     typer.echo(f"wrote {count} queries to {out}")
 

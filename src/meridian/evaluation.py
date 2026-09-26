@@ -2,7 +2,8 @@
 
 Queries are generated once from real corpus passages by Claude, then frozen and
 committed (``data/eval/queries.jsonl``), so every evaluation run scores the same
-queries. Each query's relevant document is the one its passage came from.
+queries. A single-hop query's relevant document is the one its passage came
+from; a multi-hop query needs, and is judged against, two documents.
 
 The ablation runs every pipeline configuration against the same index and the
 same precomputed query embeddings, so differences between rows are attributable
@@ -67,6 +68,31 @@ or "the authors".
 {passages}"""
 
 
+class _GeneratedMultiHopQuestion(BaseModel):
+    question: str = Field(description="One question that needs both passages to answer.")
+
+
+MULTIHOP_PROMPT = """\
+Below are two passages from two different documents.
+
+Write one question that a practitioner might type into a technical search \
+engine, such that answering it fully requires information from BOTH passages: \
+for example a comparison, a contrast, or a connection between them. Requirements:
+- Neither passage alone is enough to answer it.
+- Paraphrase: do not copy distinctive multi-word phrases or rare terms from the \
+passages unless they are the unavoidable names of the concepts being asked about.
+- Self-contained: never refer to "the passages", "these documents", or "the authors".
+- One sentence, under 30 words.
+
+<passage title="{title_a}">
+{passage_a}
+</passage>
+
+<passage title="{title_b}">
+{passage_b}
+</passage>"""
+
+
 def _select_passages(document: Document, per_article: int, rng: random.Random) -> list[str]:
     if document.metadata.get("source") == "arxiv":
         return [document.text]
@@ -78,26 +104,46 @@ def _select_passages(document: Document, per_article: int, rng: random.Random) -
     return rng.sample(paragraphs, min(per_article, len(paragraphs)))
 
 
+def _multihop_pairs(
+    documents: Sequence[Document], per_topic: int, rng: random.Random
+) -> list[tuple[Document, Document]]:
+    """Distinct same-topic pairs of Wikipedia articles (mirrors excluded), seeded."""
+    by_topic: dict[str, list[Document]] = defaultdict(list)
+    for d in documents:
+        if d.metadata.get("source") == "wikipedia":
+            by_topic[d.metadata.get("topic", "unknown")].append(d)
+    pairs: list[tuple[Document, Document]] = []
+    for topic in sorted(by_topic):
+        docs = sorted(by_topic[topic], key=lambda d: d.doc_id)
+        candidates = [(a, b) for i, a in enumerate(docs) for b in docs[i + 1 :]]
+        pairs.extend(rng.sample(candidates, min(per_topic, len(candidates))))
+    return pairs
+
+
 async def build_eval_set(
     corpus_path: Path,
     out_path: Path,
     settings: GenerationSettings,
     *,
     passages_per_article: int = 2,
+    multihop_per_topic: int = 5,
     concurrency: int = 8,
     seed: int = 13,
 ) -> int:
-    """Generate one query per sampled corpus passage and write them as JSONL.
+    """Generate single-hop and multi-hop queries from corpus passages and write them as JSONL.
 
-    arXiv documents contribute their abstract; Wikipedia articles contribute
-    ``passages_per_article`` randomly sampled paragraphs (seeded, so the sample
-    is reproducible).
+    Single-hop: arXiv documents contribute their abstract; Wikipedia articles
+    contribute ``passages_per_article`` randomly sampled paragraphs. Multi-hop:
+    ``multihop_per_topic`` pairs of same-topic Wikipedia articles each yield one
+    question that needs a passage from both; both documents are relevant.
+    Near-duplicate mirrors never seed queries. All sampling is seeded.
 
     Args:
         corpus_path: Corpus JSONL.
         out_path: Destination queries JSONL.
         settings: Claude configuration.
         passages_per_article: Paragraphs sampled per Wikipedia article.
+        multihop_per_topic: Two-document queries generated per topic.
         concurrency: Concurrent Claude requests.
         seed: Passage-sampling seed.
 
@@ -115,6 +161,8 @@ async def build_eval_set(
     slots = asyncio.Semaphore(concurrency)
 
     async def one(document: Document) -> list[dict[str, Any]]:
+        if document.metadata.get("source") == "mirror":
+            return []
         passages = _select_passages(
             document, passages_per_article, random.Random(f"{seed}:{document.doc_id}")
         )
@@ -155,8 +203,46 @@ async def build_eval_set(
             for i, (q, p) in enumerate(zip(questions, passages, strict=True))
         ]
 
+    async def multi(first: Document, second: Document) -> list[dict[str, Any]]:
+        rng = random.Random(f"{seed}:{first.doc_id}+{second.doc_id}")
+        passages = [_select_passages(d, 1, rng) for d in (first, second)]
+        if not all(passages):
+            return []
+        prompt = MULTIHOP_PROMPT.format(
+            title_a=first.title,
+            passage_a=passages[0][0],
+            title_b=second.title,
+            passage_b=passages[1][0],
+        )
+        async with slots:
+            try:
+                response = await client.messages.parse(
+                    model=settings.model,
+                    max_tokens=16_000,
+                    output_config={"effort": "low"},
+                    messages=[{"role": "user", "content": prompt}],
+                    output_format=_GeneratedMultiHopQuestion,
+                )
+            except anthropic.APIError as exc:
+                raise GenerationError(
+                    f"multi-hop generation failed for {first.doc_id}+{second.doc_id}"
+                ) from exc
+        if response.stop_reason == "refusal" or response.parsed_output is None:
+            raise GenerationError(f"no question for {first.doc_id}+{second.doc_id} ({response.stop_reason})")
+        return [
+            {
+                "query_id": f"multihop:{first.doc_id}+{second.doc_id}",
+                "query": response.parsed_output.question.strip(),
+                "relevant_doc_ids": [first.doc_id, second.doc_id],
+                "source": "multihop",
+                "topic": first.metadata.get("topic", "unknown"),
+                "passage": [passages[0][0], passages[1][0]],
+            }
+        ]
+
+    pairs = _multihop_pairs(documents, multihop_per_topic, random.Random(f"{seed}:multihop"))
     try:
-        batches = await asyncio.gather(*(one(d) for d in documents))
+        batches = await asyncio.gather(*(one(d) for d in documents), *(multi(a, b) for a, b in pairs))
     finally:
         await client.close()
 
@@ -220,6 +306,10 @@ class QueryScores:
     latency_ms: float
 
 
+def _canonical_doc_id(chunk: ScoredChunk) -> str:
+    return chunk.chunk.metadata.get("duplicate_of") or chunk.chunk.doc_id
+
+
 def score_ranking(
     chunks: Sequence[ScoredChunk], relevant: frozenset[str], k: int, latency_ms: float
 ) -> QueryScores:
@@ -227,9 +317,12 @@ def score_ranking(
 
     A document counts at the rank of its first retrieved chunk; later chunks of
     the same document add no gain (they are redundant, not additional relevant
-    items). With binary relevance and one relevant document per query, Recall@k
-    equals hit rate and nDCG@k reduces to ``1 / log2(rank + 1)``, but the code
-    handles several relevant documents per query.
+    items). Near-duplicate mirrors (``duplicate_of`` in chunk metadata) count as
+    their original, so they add no credit or distinct-document diversity.
+
+    With one relevant document, Recall@k equals hit rate and nDCG@k reduces to
+    ``1 / log2(rank + 1)``. Multi-hop queries have several relevant documents;
+    Recall@k is then the fraction of them retrieved.
 
     Args:
         chunks: Ranked chunks (at least ``k`` are considered if present).
@@ -241,11 +334,11 @@ def score_ranking(
         The query's scores.
     """
     top = list(chunks[:k])
+    docs = [_canonical_doc_id(c) for c in top]
     seen: set[str] = set()
     gains: list[float] = []
     first: int | None = None
-    for rank, chunk in enumerate(top, start=1):
-        doc = chunk.chunk.doc_id
+    for rank, doc in enumerate(docs, start=1):
         hit = doc in relevant and doc not in seen
         seen.add(doc)
         gains.append(1.0 if hit else 0.0)
@@ -255,7 +348,7 @@ def score_ranking(
     ideal = sum(1.0 / np.log2(r + 1) for r in range(1, min(len(relevant), k) + 1))
 
     def found_at(cutoff: int) -> float:
-        return len({c.chunk.doc_id for c in top[:cutoff]} & relevant) / len(relevant)
+        return len(set(docs[:cutoff]) & relevant) / len(relevant)
 
     if len(top) >= 2:
         vectors = np.vstack([c.dense for c in top])
@@ -350,6 +443,7 @@ class Summary:
     intra_list_similarity: float
     latency_p50_ms: float
     ndcg_by_source: dict[str, float]
+    recall_by_source: dict[str, float]
 
 
 async def run_evaluation(
@@ -438,8 +532,10 @@ def _summarize(
     ndcg = np.array([s.ndcg_at_k for s in scores])
     recall = np.array([s.recall_at_k for s in scores])
     by_source: dict[str, list[float]] = defaultdict(list)
+    recall_by_source: dict[str, list[float]] = defaultdict(list)
     for q, s in zip(queries, scores, strict=True):
         by_source[q.source].append(s.ndcg_at_k)
+        recall_by_source[q.source].append(s.recall_at_k)
     return Summary(
         name=config.name,
         description=config.description,
@@ -455,6 +551,7 @@ def _summarize(
         intra_list_similarity=float(np.mean([s.intra_list_similarity for s in scores])),
         latency_p50_ms=float(statistics.median(s.latency_ms for s in scores)),
         ndcg_by_source={src: float(np.mean(v)) for src, v in sorted(by_source.items())},
+        recall_by_source={src: float(np.mean(v)) for src, v in sorted(recall_by_source.items())},
     )
 
 
@@ -532,14 +629,20 @@ def _picture(prefix: str) -> str:
 def _report_markdown(summaries: Sequence[Summary], meta: dict[str, Any]) -> str:
     k = meta["k"]
     sources = sorted({src for s in summaries for src in s.ndcg_by_source})
+    nan = float("nan")
     by_source = (
-        "| Configuration | " + " | ".join(f"nDCG@{k} ({src})" for src in sources) + " |\n"
+        "| Configuration | "
+        + " | ".join(f"nDCG@{k} ({src}) | Recall@{k} ({src})" for src in sources)
+        + " |\n"
         "|---|"
-        + "---|" * len(sources)
+        + "---|---|" * len(sources)
         + "\n"
         + "\n".join(
             f"| {s.name} | "
-            + " | ".join(f"{s.ndcg_by_source.get(src, float('nan')):.3f}" for src in sources)
+            + " | ".join(
+                f"{s.ndcg_by_source.get(src, nan):.3f} | {s.recall_by_source.get(src, nan):.3f}"
+                for src in sources
+            )
             + " |"
             for s in summaries
         )
@@ -592,9 +695,14 @@ across {len(meta["topics"])} topics ({", ".join(meta["topics"])}), indexed as **
 - Clusters: {meta["clusters"]} (spherical k-means, k chosen by cosine silhouette).
 {purity_line}
 - Queries: {meta["queries"]} ({", ".join(f"{v} {k_}" for k_, v in meta["queries_by_source"].items())}), \
-one per sampled passage, written by Claude from that passage and frozen in `data/eval/queries.jsonl`. \
-The passage's document is the relevant document.
-- Metrics use document-level relevance at cutoff k={k}: a document counts at the rank of its first chunk.
+written by Claude and frozen in `data/eval/queries.jsonl`. Single-hop (`wikipedia`, `arxiv`) queries are \
+written from one sampled passage, whose document is the relevant one. Multi-hop (`multihop`) queries are \
+written from passages of two same-topic articles and need both; both documents are relevant.
+- Distractors: the corpus includes near-duplicate `mirror` copies of some articles (lead and headings \
+kept, ~20% of other paragraphs dropped). A mirror is scored as its original, so it earns no extra credit \
+and no extra distinct-document count, but its chunks can crowd other documents out of the top k.
+- Metrics use document-level relevance at cutoff k={k}: a document counts at the rank of its first chunk. \
+For multi-hop queries, Recall@{k} is the fraction of the two relevant documents retrieved.
 
 ### Configurations
 
@@ -602,12 +710,17 @@ The passage's document is the relevant document.
 
 ## Caveats
 
-- **One judged document per query.** Other documents that also answer a query count as misses, so \
-absolute scores are a lower bound; comparisons between rows are the meaningful signal.
-- **Generated queries.** Each is written from a single passage. Despite the paraphrasing instruction they \
-can share vocabulary with it, which may favor lexical (BM25) matching relative to real user queries.
-- **MMR is not a relevance optimization.** With one relevant document, diversity cannot raise nDCG. Its \
-value shows up in the diversity table, and the Δ column shows what that diversity costs in ranking quality.
+- **Sparse judgments.** Only the source document(s) of each query are judged relevant. Other documents \
+that also answer it count as misses, so absolute scores are a lower bound; comparisons between rows are \
+the meaningful signal.
+- **Generated queries.** Each is written from specific passages. Despite the paraphrasing instruction they \
+can share vocabulary with them, which may favor lexical (BM25) matching relative to real user queries.
+- **Synthetic distractors.** Mirrors are mechanical copies, more uniform than real-world overlap between \
+documents; they isolate the redundancy effect rather than model it faithfully.
+- **MMR is a diversity optimization, not a relevance one.** It can still move nDCG either way: a document \
+counts at the rank of its first chunk, so demoting redundant chunks of other documents can lift the relevant \
+one, while demoting a chunk too similar to one already chosen can push it down. Its intended effect shows \
+in the diversity table; the Δ column shows the net effect on ranking quality.
 - Sample size: CIs come from {BOOTSTRAP_RESAMPLES:,} bootstrap resamples over queries (seed {BOOTSTRAP_SEED}).
 """
 

@@ -7,7 +7,7 @@ from meridian.evaluation import bootstrap_ci, score_ranking
 from meridian.models import Chunk, ScoredChunk
 
 
-def _chunk(doc_id: str, vector: list[float]) -> ScoredChunk:
+def _chunk(doc_id: str, vector: list[float], duplicate_of: str | None = None) -> ScoredChunk:
     v = np.asarray(vector, dtype=np.float32)
     return ScoredChunk(
         chunk=Chunk(
@@ -20,6 +20,7 @@ def _chunk(doc_id: str, vector: list[float]) -> ScoredChunk:
             title="",
             source_uri="",
             content_hash="",
+            metadata={"duplicate_of": duplicate_of} if duplicate_of else {},
         ),
         score=0.0,
         dense=v / np.linalg.norm(v),
@@ -69,3 +70,21 @@ def test_bootstrap_ci_brackets_the_mean_and_is_deterministic() -> None:
 
     assert low < values.mean() < high
     assert bootstrap_ci(values) == (low, high)
+
+
+def test_mirror_counts_as_its_original_and_adds_no_diversity() -> None:
+    ranking = [_chunk("mirror:b", [1, 0], duplicate_of="b"), _chunk("b", [1, 0]), _chunk("c", [0, 1])]
+    scores = score_ranking(ranking, frozenset({"b"}), k=10, latency_ms=0.0)
+
+    assert scores.first_relevant_rank == 1  # the mirror carries the answer
+    assert scores.ndcg_at_k == pytest.approx(1.0)
+    assert scores.distinct_docs == 2  # b (twice) and c
+
+
+def test_multihop_recall_is_the_fraction_of_relevant_docs_found() -> None:
+    ranking = [_chunk("a", [1, 0]), _chunk("mirror:a", [1, 0], duplicate_of="a"), _chunk("x", [0, 1])]
+    scores = score_ranking(ranking, frozenset({"a", "b"}), k=10, latency_ms=0.0)
+
+    assert scores.recall_at_k == pytest.approx(0.5)
+    ideal = 1 + 1 / np.log2(3)
+    assert scores.ndcg_at_k == pytest.approx(1 / ideal)

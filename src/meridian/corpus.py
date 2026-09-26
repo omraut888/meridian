@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import urllib.error
 import urllib.request
@@ -79,6 +80,10 @@ TOPICS: tuple[Topic, ...] = (
             "CAP theorem",
             "Vector clock",
             "Two-phase commit protocol",
+            "Lamport timestamp",
+            "Gossip protocol",
+            "Leader election",
+            "Eventual consistency",
         ),
     ),
     Topic(
@@ -93,6 +98,10 @@ TOPICS: tuple[Topic, ...] = (
             "Diffie–Hellman key exchange",
             "Zero-knowledge proof",
             "Post-quantum cryptography",
+            "Digital signature",
+            "Merkle tree",
+            "Transport Layer Security",
+            "Block cipher mode of operation",
         ),
     ),
     Topic(
@@ -107,6 +116,10 @@ TOPICS: tuple[Topic, ...] = (
             "Machine translation",
             "BERT (language model)",
             "Part-of-speech tagging",
+            "Attention (machine learning)",
+            "Recurrent neural network",
+            "Sentiment analysis",
+            "Seq2seq",
         ),
     ),
     Topic(
@@ -121,6 +134,10 @@ TOPICS: tuple[Topic, ...] = (
             "Vision transformer",
             "Scale-invariant feature transform",
             "Feature (computer vision)",
+            "Residual neural network",
+            "U-Net",
+            "Edge detection",
+            "Image registration",
         ),
     ),
     Topic(
@@ -135,6 +152,10 @@ TOPICS: tuple[Topic, ...] = (
             "Database index",
             "ACID",
             "Two-phase locking",
+            "Snapshot isolation",
+            "Isolation (database systems)",
+            "Hash join",
+            "Database transaction",
         ),
     ),
     Topic(
@@ -149,6 +170,10 @@ TOPICS: tuple[Topic, ...] = (
             "Just-in-time compilation",
             "Dead-code elimination",
             "LLVM",
+            "Abstract syntax tree",
+            "Intermediate representation",
+            "Loop optimization",
+            "Garbage collection (computer science)",
         ),
     ),
 )
@@ -297,13 +322,20 @@ class CorpusBuilder:
         return records
 
 
-async def fetch_corpus(out: Path, *, arxiv_per_topic: int = 15, wikipedia_max_chars: int = 5_000) -> int:
+async def fetch_corpus(
+    out: Path,
+    *,
+    arxiv_per_topic: int = 20,
+    wikipedia_max_chars: int = 8_000,
+    mirrors_per_topic: int = 2,
+) -> int:
     """Fetch the full corpus and write it as JSONL.
 
     Args:
         out: Destination ``.jsonl`` path.
         arxiv_per_topic: arXiv abstracts per topic.
         wikipedia_max_chars: Per-article character budget (see :class:`CorpusBuilder`).
+        mirrors_per_topic: Near-duplicate distractors added per topic (see :func:`add_mirrors`).
 
     Returns:
         The number of records written.
@@ -315,6 +347,7 @@ async def fetch_corpus(out: Path, *, arxiv_per_topic: int = 15, wikipedia_max_ch
             client, arxiv_per_topic=arxiv_per_topic, wikipedia_max_chars=wikipedia_max_chars
         )
         records = await builder.build()
+    records.extend(add_mirrors(records, per_topic=mirrors_per_topic))
 
     seen: set[str] = set()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -326,6 +359,59 @@ async def fetch_corpus(out: Path, *, arxiv_per_topic: int = 15, wikipedia_max_ch
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     log.info("corpus.written", path=str(out), documents=len(seen))
     return len(seen)
+
+
+def add_mirrors(
+    records: Sequence[dict[str, Any]], *, per_topic: int, drop_fraction: float = 0.2, seed: int = 7
+) -> list[dict[str, Any]]:
+    """Build near-duplicate "mirror" copies of Wikipedia articles as redundancy distractors.
+
+    A mirror keeps the original's title, lead, and headings but drops a seeded
+    random ``drop_fraction`` of its other paragraphs, like a scraped or lightly
+    edited copy. It is tagged ``duplicate_of`` its original, so evaluation
+    scores it as that document: it can never earn extra relevance credit, but
+    its chunks can crowd genuinely different documents out of the top k.
+
+    Args:
+        records: Fetched corpus records.
+        per_topic: Wikipedia articles to mirror per topic.
+        drop_fraction: Share of non-lead, non-heading paragraphs removed.
+        seed: Selection and perturbation seed.
+
+    Returns:
+        The mirror records (the originals are not modified).
+    """
+    rng = random.Random(seed)
+    by_topic: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        if record["metadata"]["source"] == "wikipedia":
+            by_topic.setdefault(record["metadata"]["topic"], []).append(record)
+    mirrors: list[dict[str, Any]] = []
+    for topic in sorted(by_topic):
+        candidates = sorted(by_topic[topic], key=lambda r: r["doc_id"])
+        for original in rng.sample(candidates, min(per_topic, len(candidates))):
+            paragraphs = original["text"].split("\n")
+            is_heading = [p.startswith("==") for p in paragraphs]  # any depth: "== A ==", "=== B ==="
+            first_heading = is_heading.index(True) if any(is_heading) else len(paragraphs)
+            kept = [
+                p
+                for i, p in enumerate(paragraphs)
+                if i < first_heading or is_heading[i] or not p.strip() or rng.random() >= drop_fraction
+            ]
+            mirrors.append(
+                {
+                    "doc_id": f"mirror:{original['doc_id']}",
+                    "title": original["title"],
+                    "text": "\n".join(kept),
+                    "source_uri": original["source_uri"],
+                    "metadata": {
+                        **original["metadata"],
+                        "source": "mirror",
+                        "duplicate_of": original["doc_id"],
+                    },
+                }
+            )
+    return mirrors
 
 
 def _strip_back_matter(text: str) -> str:

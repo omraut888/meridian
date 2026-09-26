@@ -58,7 +58,7 @@ meridian eval                # ablation -> docs/eval_results.md, updates the sec
 ```
 
 <!-- eval:start -->
-_180 queries over 179 chunks from 138 documents · generated 2026-09-25 18:35 UTC by `meridian eval` · full report: [docs/eval_results.md](docs/eval_results.md)_
+_290 queries over 359 chunks from 204 documents · generated 2026-09-25 21:58 UTC by `meridian eval` · full report: [docs/eval_results.md](docs/eval_results.md)_
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/eval_results_dark.png">
@@ -67,13 +67,13 @@ _180 queries over 179 chunks from 138 documents · generated 2026-09-25 18:35 UT
 
 | Configuration | nDCG@10 [95% CI] | Δ nDCG vs hybrid [95% CI] | Recall@5 | Recall@10 | MRR@10 | Distinct docs@10 | p50 latency |
 |---|---|---|---|---|---|---|---|
-| Dense only | **0.995 [0.988, 1.000]** | +0.005 [-0.001, +0.013] | 1.000 | 1.000 | 0.994 | 8.3 | 6.5 ms |
-| BM25 only | 0.968 [0.947, 0.986] | -0.022 [-0.041, -0.005] | 0.989 | 0.994 | 0.959 | 9.0 | 8.2 ms |
-| Hybrid (RRF) | 0.990 [0.979, 0.998] | — | 1.000 | 1.000 | 0.986 | 8.7 | 14.7 ms |
-| Hybrid + routing (m=1) | 0.974 [0.959, 0.988] | -0.016 [-0.031, -0.002] | 1.000 | 1.000 | 0.965 | 8.5 | 19.3 ms |
-| Hybrid + routing (m=3) | 0.990 [0.979, 0.998] | +0.000 [-0.006, +0.006] | 1.000 | 1.000 | 0.986 | 8.6 | 23.6 ms |
-| Hybrid + MMR (λ=0.7) | 0.992 [0.984, 0.998] | +0.002 [-0.004, +0.008] | 1.000 | 1.000 | 0.989 | 9.2 | 25.8 ms |
-| Hybrid + routing + MMR (default) | 0.992 [0.984, 0.998] | +0.002 [+0.000, +0.006] | 1.000 | 1.000 | 0.989 | 9.2 | 34.1 ms |
+| Dense only | 0.968 [0.955, 0.980] | -0.005 [-0.017, +0.005] | 0.969 | 0.990 | 0.978 | 6.7 | 6.8 ms |
+| BM25 only | 0.936 [0.916, 0.954] | -0.038 [-0.053, -0.023] | 0.967 | 0.993 | 0.928 | 7.5 | 4.5 ms |
+| Hybrid (RRF) | 0.974 [0.963, 0.984] | — | 0.983 | 0.997 | 0.979 | 7.0 | 9.9 ms |
+| Hybrid + routing (m=1) | 0.942 [0.926, 0.959] | -0.032 [-0.046, -0.019] | 0.978 | 0.995 | 0.938 | 6.9 | 10.7 ms |
+| Hybrid + routing (m=3) | 0.968 [0.956, 0.979] | -0.006 [-0.013, -0.000] | 0.983 | 0.997 | 0.971 | 7.0 | 14.1 ms |
+| Hybrid + MMR (λ=0.7) | **0.975 [0.964, 0.985]** | +0.001 [-0.003, +0.004] | 0.986 | 0.997 | 0.977 | 8.2 | 16.0 ms |
+| Hybrid + routing + MMR (default) | 0.971 [0.960, 0.982] | -0.003 [-0.009, +0.003] | 0.986 | 0.997 | 0.973 | 8.2 | 20.3 ms |
 <!-- eval:end -->
 
 ## Tests
