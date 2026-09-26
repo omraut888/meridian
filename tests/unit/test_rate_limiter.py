@@ -23,16 +23,26 @@ def _limiter(clock: FakeClock, *, requests: int | None = None, tokens: int | Non
     return RateLimiter(requests=requests, tokens=tokens, clock=clock, sleep=clock.sleep)
 
 
-async def test_requests_beyond_the_limit_wait_for_the_window() -> None:
+async def test_requests_are_spaced_evenly_across_the_window() -> None:
     clock = FakeClock()
     limiter = _limiter(clock, requests=3)
-    for _ in range(3):
+    sent_at = []
+    for _ in range(4):
         await limiter.acquire(1)
-    assert clock.sleeps == []
+        sent_at.append(clock.now)
+    # 3 per 60 s means one every 20 s, never a burst of 3.
+    assert sent_at == pytest.approx([0.0, 20.0, 40.0, 60.0])
 
-    clock.now = 10.0
-    await limiter.acquire(1)
-    assert clock.now == pytest.approx(60.0)  # first request (t=0) left the window
+
+async def test_request_after_an_idle_gap_is_sent_immediately() -> None:
+    clock = FakeClock()
+    limiter = _limiter(clock, requests=3)
+    await limiter.acquire(1)  # t=0
+    clock.now = 50.0
+    await limiter.acquire(1)  # well past the 20 s spacing: no wait
+    assert clock.now == pytest.approx(50.0)
+    await limiter.acquire(1)  # spaced from the t=50 request
+    assert clock.now == pytest.approx(70.0)
 
 
 async def test_token_budget_waits_until_enough_tokens_expire() -> None:

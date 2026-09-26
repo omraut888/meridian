@@ -33,8 +33,11 @@ pacing, which caps batch size at the token budget and spaces requests to fit bot
 
 ```bash
 export MERIDIAN_VOYAGE__REQUESTS_PER_MINUTE=3
-export MERIDIAN_VOYAGE__TOKENS_PER_MINUTE=9000   # headroom under 10K for tokenizer differences
+export MERIDIAN_VOYAGE__TOKENS_PER_MINUTE=6000
 ```
+
+Use 6000, not the nominal 10K: Voyage rejected every ~9K-token batch even though it billed them at the
+same token count we measure locally, while 6K batches went through with zero retries.
 
 Everything still works, just slower: ingesting the full corpus takes several minutes instead of seconds.
 Adding a payment method lifts the limits (Voyage's free token allowance still applies).

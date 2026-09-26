@@ -36,6 +36,11 @@ log = structlog.get_logger(__name__)
 
 # Only failures that can succeed on retry. Auth and request-validation errors
 # are raised immediately: retrying them wastes quota and hides the real bug.
+# Voyage timestamps requests on arrival, and upload latency varies with batch
+# size, so a request sent exactly 60 s after an earlier one can land inside that
+# one's minute. A 60 s window produced one 429 per minute at the window edge.
+_PACING_WINDOW_S = 62.0
+
 _TRANSIENT_VOYAGE_ERRORS: tuple[type[Exception], ...] = (
     voyageai.error.RateLimitError,
     voyageai.error.ServiceUnavailableError,
@@ -66,12 +71,15 @@ def voyage_token_counter(model: str) -> TokenCounter:
 
 
 class RateLimiter:
-    """Sliding-window limit on requests and tokens per window.
+    """Sliding-window limit on requests and tokens per window, with even spacing.
 
     ``acquire`` waits until a request of the given size fits both budgets, then
-    records it. Pacing before sending, instead of retrying on 429s, matters under
-    very low limits: rejected requests count against the request budget too, so
-    retry storms can starve every batch.
+    records it. Requests are also spaced at least ``window / requests`` apart:
+    providers often enforce "N per minute" as a smoothly refilling bucket, which
+    rejects a burst of N even when the window has room. Pacing before sending,
+    instead of retrying on 429s, matters under very low limits: rejected
+    requests count against the request budget too, so retry storms can starve
+    every batch.
     """
 
     def __init__(
@@ -123,8 +131,10 @@ class RateLimiter:
     def _wait_for(self, now: float, tokens: int) -> float:
         """Seconds until enough of the window expires for this request to fit."""
         wait = 0.0
-        if self._requests is not None and len(self._sent) >= self._requests:
-            wait = self._sent[len(self._sent) - self._requests][0] + self._window - now
+        if self._requests is not None and self._sent:
+            wait = self._sent[-1][0] + self._window / self._requests - now  # even spacing
+            if len(self._sent) >= self._requests:
+                wait = max(wait, self._sent[len(self._sent) - self._requests][0] + self._window - now)
         if self._tokens is not None:
             used = sum(t for _, t in self._sent)
             for sent_at, sent_tokens in self._sent:
@@ -197,7 +207,11 @@ class VoyageEmbedder:
         self._semaphore = asyncio.Semaphore(settings.max_concurrency)
         self._count_tokens = voyage_token_counter(settings.model)
         self._limiter = (
-            RateLimiter(requests=settings.requests_per_minute, tokens=settings.tokens_per_minute)
+            RateLimiter(
+                requests=settings.requests_per_minute,
+                tokens=settings.tokens_per_minute,
+                window_s=_PACING_WINDOW_S,
+            )
             if settings.requests_per_minute or settings.tokens_per_minute
             else None
         )
