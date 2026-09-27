@@ -1,6 +1,3 @@
-# Instructions for Claude Code
+# CLAUDE.md
 
-## Commits
-
-- Do not add a `Co-Authored-By` line (or any other AI attribution trailer) to commit messages. Every
-  commit's author and committer is Om Raut <omraut0888@gmail.com>.
+- No `Co-Authored-By` or other AI attribution trailers in commit messages. Author and committer: Om Raut <omraut0888@gmail.com>.

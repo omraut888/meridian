@@ -1,16 +1,17 @@
 # Meridian
 
-Hybrid RAG pipeline with MMR re-ranking and an evaluation harness that measures every retrieval stage.
+A hybrid RAG pipeline with MMR re-ranking, plus the evaluation harness I use to measure what each retrieval
+stage actually contributes.
 
-Documents are chunked along their structure, embedded with Voyage AI (dense) and BM25 (sparse), and
-indexed in Qdrant. Queries run both branches, fuse them with reciprocal rank fusion, and re-rank with
-MMR. Claude writes the answer, citing the retrieved chunks. An optional cluster-routing stage can restrict
-the dense branch to the nearest topic clusters; it is off by default because the evaluation found it cost
-accuracy (see [Design rationale](#design-rationale)).
+Documents are chunked along their structure, embedded twice (densely with Voyage AI, sparsely with BM25),
+and indexed in Qdrant. At query time both branches run, reciprocal rank fusion merges their results, and
+MMR re-ranks them. Claude then writes the answer, citing the chunks it drew on. There's also an optional
+cluster-routing stage that restricts the dense branch to the nearest topic clusters. I turned it off by
+default after the evaluation showed it cost accuracy; [Design rationale](#design-rationale) explains why.
 
 ## Setup
 
-Requires Python 3.11+ and Docker.
+You'll need Python 3.11+ and Docker.
 
 ```bash
 python -m venv venv && source venv/bin/activate
@@ -28,20 +29,21 @@ cp .env.example .env                 # then fill in both keys
 
 ### Running without a paid Voyage account
 
-Voyage accounts without a payment method are limited to 3 requests and 10K tokens per minute. Without
-pacing, the default batch size exceeds that and embedding fails after its retries. Turn on client-side
-pacing, which caps batch size at the token budget and spaces requests to fit both limits:
+Without a payment method on file, Voyage caps you at 3 requests and 10K tokens per minute. The default
+batch size blows past that, so unpaced embedding fails once its retries run out. Client-side pacing fixes
+this by capping each batch at the token budget and spacing requests out to stay inside both limits:
 
 ```bash
 export MERIDIAN_VOYAGE__REQUESTS_PER_MINUTE=3
 export MERIDIAN_VOYAGE__TOKENS_PER_MINUTE=6000
 ```
 
-Use 6000, not the nominal 10K: Voyage rejected every ~9K-token batch even though it billed them at the
-same token count we measure locally, while 6K batches went through with zero retries.
+I use 6000 rather than the nominal 10K because Voyage rejected every ~9K-token batch I sent, even though it
+billed those batches at the same token count I measure locally. At 6K, batches went through with zero
+retries.
 
-Everything still works, just slower: ingesting the full corpus takes several minutes instead of seconds.
-Adding a payment method lifts the limits (Voyage's free token allowance still applies).
+Everything still works this way, only slower: ingesting the full corpus takes several minutes instead of
+seconds. Adding a payment method lifts the limits, and Voyage's free token allowance still applies.
 
 ## Usage
 
@@ -79,50 +81,61 @@ _290 queries over 359 chunks from 204 documents · generated 2026-09-27 00:01 UT
 
 ## Design rationale
 
-Each retrieval stage started as a hypothesis, and the evaluation harness exists to test them: it turns
-each stage on and off against the same index and the same query embeddings, so a difference between rows
-comes from that stage alone. The numbers below come from the table above (290 queries, 359 chunks, k=10)
-and the per-source breakdown in [docs/eval_results.md](docs/eval_results.md). Every claim below held in
-two separate runs of the full eval.
+Every retrieval stage started out as a hypothesis, and the eval harness is how I test them. It switches
+each stage on and off against the same index and the same query embeddings, so any difference between two
+rows comes from that one stage. The numbers here come from the table above (290 queries, 359 chunks, k=10)
+and the per-source breakdown in [docs/eval_results.md](docs/eval_results.md), and every claim held up
+across two separate runs of the full eval.
 
-**Hybrid search (dense + BM25, fused with reciprocal rank fusion): kept.** Dense embeddings match
-meaning; BM25 matches exact terms like algorithm names and acronyms. Of the three retrieval methods,
-hybrid is the only one near the top on every query type. On multi-document queries it retrieves 96.7% of
-the relevant documents, against 90.0% for dense search alone, and overall it beats BM25 alone by 0.038
-nDCG@10 (95% CI 0.023 to 0.053).
+### Hybrid search
 
-**MMR re-ranking (λ = 0.7): kept, and on by default.** The corpus deliberately includes near-duplicate
-"mirror" articles, which fill the top results with repeated content. MMR raises the number of distinct
-documents in the top 10 from 7.0 to 8.2, with no measurable effect on ranking quality: the change in
-nDCG@10 is indistinguishable from zero (95% CI −0.005 to +0.006). It adds some latency, though the laptop
-timings here are too noisy to put a precise number on it.
+Dense embeddings capture meaning, and BM25 catches exact terms like algorithm names and acronyms, so I
+merge the two with reciprocal rank fusion. Of the three retrieval methods, hybrid is the only one that
+stays near the top on every query type. It finds 96.7% of the relevant documents on multi-document
+queries, compared with 90.0% for dense search alone, and it beats BM25 alone by 0.038 nDCG@10 overall (95%
+CI 0.023 to 0.053). It was an easy one to keep.
 
-**Cluster routing: tested, and the eval disproved it at this scale.** The hypothesis was that restricting
-dense search to the query's nearest topic clusters would cut noise from unrelated topics. The clusters
-themselves are sound: 81% of chunks land in a cluster whose majority topic is their own, without the
-clusterer ever seeing topic labels. But routing loses relevant documents that sit in a neighbouring
-cluster. Routing to 1 cluster clearly hurts: it cost 0.032 and 0.035 nDCG@10 in two runs, with confidence
-intervals well below zero both times. Routing to 3 clusters never helped. It cost about 0.005, which is
-within run-to-run noise (95% CI −0.012 to +0.002 in the latest run). Both settings add latency. The harness
-was built partly to validate this design choice, and it did its job by rejecting it. With about 360
+### MMR re-ranking
+
+I seeded the corpus with near-duplicate "mirror" articles on purpose, because that kind of redundancy is
+what fills a top 10 with the same content. With MMR at λ = 0.7, the number of distinct documents in the
+top 10 goes from 7.0 to 8.2, and ranking quality doesn't measurably move: the change in nDCG@10 is
+indistinguishable from zero (95% CI −0.005 to +0.006). It does add some latency, though my laptop timings
+are too noisy to say how much. MMR stays, and it's on by default.
+
+### Cluster routing
+
+This is the one the eval talked me out of. My hypothesis was that searching only the query's nearest topic
+clusters would cut noise from unrelated topics. The clusters themselves came out well: 81% of chunks land
+in a cluster whose majority topic is their own, and the clusterer never sees topic labels. The problem is
+that routing drops relevant documents sitting in a neighbouring cluster.
+
+Routing to 1 cluster clearly hurts. It cost 0.032 and 0.035 nDCG@10 across two runs, with confidence
+intervals well below zero both times. Routing to 3 clusters never helped either. It cost about 0.005,
+which is within run-to-run noise (95% CI −0.012 to +0.002 in the latest run), and both settings add
+latency.
+
+I built the harness partly to check this design choice, and it did its job by rejecting it. At about 360
 chunks, searching everything is already fast, so routing has nothing to save. It might pay off on an index
-large enough that exhaustive search is expensive, but that is untested. Routing therefore ships **off by
-default**. It remains implemented, and every eval run still measures it (routing to 1 and to 3 clusters,
-and routing combined with MMR). To turn it on, set `MERIDIAN_RETRIEVAL__ROUTE_TOP_M=3` (the number of
+big enough that exhaustive search gets expensive, but I haven't tested that. So routing ships **off by
+default**. The code is still there, and every eval run still measures it: routing to 1 and to 3 clusters,
+plus routing combined with MMR. To turn it on, set `MERIDIAN_RETRIEVAL__ROUTE_TOP_M=3` (the number of
 clusters to search) and run `meridian recluster` first.
 
-**How far to trust these numbers**
+### How far I'd trust these numbers
 
-- The multi-document results rest on only 30 queries, which have 60 relevant documents between them:
-  96.7% versus 90.0% is 58 versus 54 documents found. The per-source breakdown has no confidence
-  intervals, so treat multi-document differences as indicative, not established.
-- Reruns on the same index are not bit-identical. Between two runs, BM25 scores changed for 3 of the 290
-  queries (one was an exact tie between a mirror and its original), shifting nDCG means by up to 0.005.
-  The exact cause is not pinned down. Treat differences smaller than about 0.005 as noise.
-- Single-document queries are near ceiling (Recall@10 is 1.0 for almost every configuration), so they
-  barely separate the configurations.
-- Claude generated the queries from corpus passages, and only each query's source documents count as
-  relevant. The full list of caveats is in [docs/eval_results.md](docs/eval_results.md#caveats).
+The multi-document results rest on just 30 queries with 60 relevant documents between them, so 96.7%
+versus 90.0% really means 58 versus 54 documents found. The per-source breakdown has no confidence
+intervals either, so I read the multi-document differences as indicative rather than established.
+
+Reruns on the same index also aren't bit-identical. Between two runs, BM25 scores changed for 3 of the 290
+queries (one was an exact tie between a mirror and its original), which moved nDCG means by up to 0.005. I
+haven't pinned down the exact cause, so I treat any difference smaller than about 0.005 as noise.
+
+The single-document queries sit close to ceiling, with Recall@10 at 1.0 for almost every configuration, so
+they barely separate the configurations. And because Claude generated the queries from corpus passages,
+only each query's source documents count as relevant. The rest of the caveats are in
+[docs/eval_results.md](docs/eval_results.md#caveats).
 
 ## Tests
 
@@ -132,19 +145,20 @@ pytest -m integration        # live Qdrant + Voyage + Claude on throwaway collec
 ```
 
 The integration suite covers ingestion, retrieval, routing and MMR, cited generation, and the HTTP API
-(`/healthz`, `/readyz`, `/v1/retrieve`, and the streamed `/v1/answer`). It skips when API keys are missing.
+(`/healthz`, `/readyz`, `/v1/retrieve`, and the streamed `/v1/answer`). It skips itself when API keys are
+missing.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, format, type checks, and unit tests
-on every push and pull request. Integration tests need live keys, so they run only on demand: add the
-`MERIDIAN_VOYAGE__API_KEY` and `MERIDIAN_GENERATION__API_KEY` repository secrets, then run the workflow
-manually from the Actions tab with "Also run live integration tests" checked.
+on every push and pull request. Integration tests need live keys, so I run them on demand instead: add the
+`MERIDIAN_VOYAGE__API_KEY` and `MERIDIAN_GENERATION__API_KEY` repository secrets, then trigger the workflow
+from the Actions tab with "Also run live integration tests" checked.
 
 ## License
 
-The source code is available under the [PolyForm Strict License 1.0.0](LICENSE). You may read it and
-run it for noncommercial purposes. You may not distribute it, modify it, or build on it, and commercial use
-is not permitted.
+The source code is available under the [PolyForm Strict License 1.0.0](LICENSE). You're free to read it
+and run it for noncommercial purposes, but not to distribute it, modify it, or build on it, and commercial
+use isn't permitted.
 
-The corpus in `data/corpus/` is not covered by that license. Wikipedia text there is licensed under
-[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and arXiv metadata is dedicated to the
-public domain under CC0 1.0. Each record names its source URL and license.
+The corpus in `data/corpus/` isn't covered by that license. Its Wikipedia text is licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and the arXiv metadata is dedicated to the
+public domain under CC0 1.0. Every record names its source URL and license.
