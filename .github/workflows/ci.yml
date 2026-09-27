@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: "Also run live integration tests (uses the Voyage and Anthropic repository secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, types, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Cache Hugging Face tokenizer and FastEmbed models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            /tmp/fastembed_cache
+          key: models-${{ runner.os }}-${{ hashFiles('src/meridian/config.py') }}
+
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+      - run: mypy src
+      # Unit tests only: pyproject's addopts deselects the `integration` marker.
+      - run: pytest
+
+  integration:
+    name: Live integration tests (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.integration
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.19.1
+        ports:
+          - 6333:6333
+        options: >-
+          --health-cmd "bash -c ':> /dev/tcp/127.0.0.1/6333'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      MERIDIAN_VOYAGE__API_KEY: ${{ secrets.MERIDIAN_VOYAGE__API_KEY }}
+      MERIDIAN_GENERATION__API_KEY: ${{ secrets.MERIDIAN_GENERATION__API_KEY }}
+      # Safe on a free-tier Voyage key (3 RPM / 10K TPM); remove both for a paid account to run faster.
+      MERIDIAN_VOYAGE__REQUESTS_PER_MINUTE: "3"
+      MERIDIAN_VOYAGE__TOKENS_PER_MINUTE: "6000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: pip install -e ".[dev]"
+
+      - name: Require secrets
+        run: |
+          test -n "$MERIDIAN_VOYAGE__API_KEY" || { echo "::error::Set the MERIDIAN_VOYAGE__API_KEY repository secret"; exit 1; }
+          test -n "$MERIDIAN_GENERATION__API_KEY" || { echo "::error::Set the MERIDIAN_GENERATION__API_KEY repository secret"; exit 1; }
+
+      # Tests skip rather than fail when keys are missing, so the step above makes a
+      # misconfigured run fail loudly instead of passing with everything skipped.
+      - run: pytest -m integration -rA

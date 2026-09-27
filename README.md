@@ -131,6 +131,14 @@ pytest                       # unit tests (no network)
 pytest -m integration        # live Qdrant + Voyage + Claude on throwaway collections
 ```
 
+The integration suite covers ingestion, retrieval, routing and MMR, cited generation, and the HTTP API
+(`/healthz`, `/readyz`, `/v1/retrieve`, and the streamed `/v1/answer`). It skips when API keys are missing.
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, format, type checks, and unit tests
+on every push and pull request. Integration tests need live keys, so they run only on demand: add the
+`MERIDIAN_VOYAGE__API_KEY` and `MERIDIAN_GENERATION__API_KEY` repository secrets, then run the workflow
+manually from the Actions tab with "Also run live integration tests" checked.
+
 ## License
 
 The source code is available under the [PolyForm Strict License 1.0.0](LICENSE). You may read it and
