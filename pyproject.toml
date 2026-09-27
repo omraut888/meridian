@@ -1,14 +1,16 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "meridian"
 version = "0.1.0"
-description = "Hybrid RAG pipeline with cluster-aware retrieval, MMR re-ranking, and cited generation."
+description = "Hybrid RAG pipeline with MMR re-ranking, cited generation, and a stage-by-stage retrieval eval."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Om Raut" }]
+license = "LicenseRef-PolyForm-Strict-1.0.0"
+license-files = ["LICENSE"]
 dependencies = [
     "anthropic>=1.8,<2",
     "defusedxml>=0.7",

@@ -82,3 +82,13 @@ _290 queries over 359 chunks from 204 documents · generated 2026-09-25 21:58 UT
 pytest                       # unit tests (no network)
 pytest -m integration        # live Qdrant + Voyage + Claude on throwaway collections
 ```
+
+## License
+
+The source code is available under the [PolyForm Strict License 1.0.0](LICENSE). You may read it and
+run it for noncommercial purposes. You may not distribute it, modify it, or build on it, and commercial use
+is not permitted.
+
+The corpus in `data/corpus/` is not covered by that license. Wikipedia text there is licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and arXiv metadata is dedicated to the
+public domain under CC0 1.0. Each record names its source URL and license.
