@@ -42,7 +42,7 @@ class RetrievalOptions:
 
     use_dense: bool = True
     use_sparse: bool = True
-    route_top_m: int = 3
+    route_top_m: int = 0
     mmr_lambda: float | None = 0.7
     top_k: int = 8
     candidate_pool: int = 40

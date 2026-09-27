@@ -1,1 +1,1 @@
-"""Meridian: hybrid RAG with cluster-aware retrieval, MMR re-ranking, and cited generation."""
+"""Meridian: hybrid RAG with MMR re-ranking, cited generation, and a stage-by-stage retrieval eval."""

@@ -77,7 +77,8 @@ class RetrievalSettings(BaseModel):
     candidate_pool: int = Field(40, ge=1)
     top_k: int = Field(8, ge=1)
     mmr_lambda: float | None = Field(0.7, ge=0.0, le=1.0)
-    route_top_m: int = Field(3, ge=0)
+    # Off by default: the eval found routing cost accuracy at this corpus scale (see README).
+    route_top_m: int = Field(0, ge=0)
 
     @model_validator(mode="after")
     def _pool_covers_top_k(self) -> RetrievalSettings:

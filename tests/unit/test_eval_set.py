@@ -63,3 +63,25 @@ def test_multihop_pairs_are_distinct_same_topic_wikipedia_only() -> None:
         assert x.doc_id != y.doc_id
         assert x.metadata["topic"] == y.metadata["topic"]
         assert {x.metadata["source"], y.metadata["source"]} == {"wikipedia"}
+
+
+def test_ablation_tags_the_shipped_default_and_still_tests_routing() -> None:
+    from dataclasses import replace
+
+    from meridian.config import RetrievalSettings
+    from meridian.evaluation import ablation_configs
+    from meridian.retrieval import RetrievalOptions
+
+    defaults = RetrievalOptions.from_settings(RetrievalSettings())
+    assert defaults.route_top_m == 0  # routing is off in the shipped configuration
+
+    configs = ablation_configs(defaults, k=10)
+    names = [c.name for c in configs]
+    assert len(names) == len(set(names))
+    assert [n for n in names if n.endswith("(default)")] == ["Hybrid + MMR (λ=0.7) (default)"]
+    assert {c.options.route_top_m for c in configs} == {0, 1, 3}
+
+    routed = ablation_configs(replace(defaults, route_top_m=3), k=10)
+    assert [c.name for c in routed if c.name.endswith("(default)")] == [
+        "Hybrid + routing + MMR (m=3, λ=0.7) (default)"
+    ]

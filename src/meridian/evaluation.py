@@ -389,9 +389,17 @@ class Configuration:
     options: RetrievalOptions
 
 
+# Routing depth evaluated as the alternative to exhaustive dense search. It is
+# fixed, not read from the defaults, so routing is still measured when it is off.
+ROUTING_M = 3
+
+
 def ablation_configs(defaults: RetrievalOptions, k: int) -> list[Configuration]:
-    """The configurations compared, from simplest to the full default pipeline."""
-    m = max(defaults.route_top_m, 1)
+    """The configurations compared, from simplest to fullest.
+
+    The row matching the shipped defaults is tagged "(default)"; if none does,
+    a separate default row is appended.
+    """
     lam = defaults.mmr_lambda if defaults.mmr_lambda is not None else 0.7
     base = replace(
         defaults,
@@ -400,7 +408,7 @@ def ablation_configs(defaults: RetrievalOptions, k: int) -> list[Configuration]:
         route_top_m=0,
         mmr_lambda=None,
     )
-    return [
+    configs = [
         Configuration("Dense only", "Voyage embeddings, cosine kNN", replace(base, use_sparse=False)),
         Configuration("BM25 only", "Sparse BM25, server-side IDF", replace(base, use_dense=False)),
         Configuration("Hybrid (RRF)", "Dense + BM25, reciprocal rank fusion", base),
@@ -410,19 +418,30 @@ def ablation_configs(defaults: RetrievalOptions, k: int) -> list[Configuration]:
             replace(base, route_top_m=1),
         ),
         Configuration(
-            f"Hybrid + routing (m={m})",
-            f"Dense branch restricted to {m} nearest clusters",
-            replace(base, route_top_m=m),
+            f"Hybrid + routing (m={ROUTING_M})",
+            f"Dense branch restricted to {ROUTING_M} nearest clusters",
+            replace(base, route_top_m=ROUTING_M),
         ),
         Configuration(
             f"Hybrid + MMR (λ={lam})", "MMR over the fused candidate pool", replace(base, mmr_lambda=lam)
         ),
         Configuration(
-            "Hybrid + routing + MMR (default)",
-            f"m={m}, λ={lam}: the shipped configuration",
-            replace(base, route_top_m=m, mmr_lambda=lam),
+            f"Hybrid + routing + MMR (m={ROUTING_M}, λ={lam})",
+            "Routing and MMR combined",
+            replace(base, route_top_m=ROUTING_M, mmr_lambda=lam),
         ),
     ]
+    shipped = replace(base, route_top_m=defaults.route_top_m, mmr_lambda=defaults.mmr_lambda)
+    for i, config in enumerate(configs):
+        if config.options == shipped:
+            configs[i] = replace(
+                config,
+                name=f"{config.name} (default)",
+                description=f"{config.description}: the shipped configuration",
+            )
+            return configs
+    configs.append(Configuration("Shipped default", "The configured defaults", shipped))
+    return configs
 
 
 @dataclass(frozen=True, slots=True)
