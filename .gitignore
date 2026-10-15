@@ -9,3 +9,4 @@ venv/
 data/sample_docs/*.raw
 *.log
 qdrant_storage/
+routing_diag.json

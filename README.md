@@ -107,13 +107,23 @@ are too noisy to say how much. MMR stays, and it's on by default.
 
 This is the one the eval talked me out of. My hypothesis was that searching only the query's nearest topic
 clusters would cut noise from unrelated topics. The clusters themselves came out well: 81% of chunks land
-in a cluster whose majority topic is their own, and the clusterer never sees topic labels. The problem is
-that routing drops relevant documents sitting in a neighbouring cluster.
+in a cluster whose majority topic is their own, and the clusterer never sees topic labels.
 
 Routing to 1 cluster clearly hurts. It cost 0.032 and 0.035 nDCG@10 across two runs, with confidence
 intervals well below zero both times. Routing to 3 clusters never helped either. It cost about 0.005,
 which is within run-to-run noise (95% CI −0.012 to +0.002 in the latest run), and both settings add
 latency.
+
+The loss isn't routing cutting relevant documents out of the results. Routing filters only the dense
+branch; BM25 still searches the whole corpus. So when a relevant chunk sits outside the routed cluster,
+BM25 still finds it, but it gets RRF credit from one branch instead of two, and in-cluster chunks that
+both branches rank moderately overtake it. It's a ranking demotion, not lost recall: Recall@10 goes from
+only 0.997 to 0.995. I checked this per query with `scripts/routing_diag.py` (summarized by
+`scripts/show_routing.py`) over two runs. With 1 cluster, 27 of the 28–29 queries that lost nDCG had
+relevant chunks outside the routed cluster, and every one of them still had its relevant document in the
+top 10, usually demoted from rank 1 to 2. Queries whose relevant chunks were outside lost 71% of the time
+(27 of 38), against at most 2 of 252 when they were inside. With 3 clusters, only 3 queries had relevant
+chunks outside, which is why the cost shrinks to noise.
 
 I built the harness partly to check this design choice, and it did its job by rejecting it. At about 360
 chunks, searching everything is already fast, so routing has nothing to save. It might pay off on an index
