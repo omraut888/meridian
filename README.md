@@ -3,6 +3,8 @@
 A hybrid RAG pipeline with MMR re-ranking, plus the evaluation harness I use to measure what each retrieval
 stage actually contributes.
 
+For the full architecture writeup, every design decision's rationale, and the complete routing investigation, see [docs/DESIGN.md](docs/DESIGN.md).
+
 Documents are chunked along their structure, embedded twice (densely with Voyage AI, sparsely with BM25),
 and indexed in Qdrant. At query time both branches run, reciprocal rank fusion merges their results, and
 MMR re-ranks them. Claude then writes the answer, citing the chunks it drew on. There's also an optional
